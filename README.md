@@ -46,7 +46,7 @@ JWT_SECRET=your_jwt_secret_key
 # OpenStack Configuration (DevStack)
 OPENSTACK_AUTH_URL=http://localhost/identity/v3
 OPENSTACK_USERNAME=admin
-OPENSTACK_PASSWORD=admin
+OPENSTACK_PASSWORD=secret
 OPENSTACK_PROJECT_ID=admin
 OPENSTACK_REGION=RegionOne
 OPENSTACK_CONTAINER=cloudstudy-files
@@ -121,10 +121,10 @@ openstack container create cloudstudy-files
 
 4. **Verify Swift Endpoint:**
 ```bash
-openstack endpoint list | grep swift
+openstack endpoint list
 ```
 
-### 5. AWS Setup
+5. **AWS Setup**
 
 #### A. Create IAM User & Access Key
 
@@ -238,28 +238,3 @@ cloudstudy/
 - Material-UI - UI components
 - React Router - Navigation
 - Axios - HTTP client
-
-## API Documentation
-
-### Authentication Endpoints
-
-- `POST /api/auth/register` - Register a new user
-- `POST /api/auth/login` - Login user
-- `GET /api/auth/me` - Get current user
-
-### Document Endpoints
-
-- `POST /api/documents` - Upload a new document
-- `GET /api/documents` - Get all documents
-- `GET /api/documents/:id` - Get document by ID
-- `PUT /api/documents/:id` - Update document
-- `DELETE /api/documents/:id` - Delete document
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
