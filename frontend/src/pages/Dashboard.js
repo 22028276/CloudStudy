@@ -24,12 +24,15 @@ import {
   DialogContent,
   DialogActions,
   Chip,
+  TextField,
+  InputAdornment,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import SearchIcon from '@mui/icons-material/Search';
 import Layout from '../components/Layout';
 
 const VisuallyHiddenInput = styled('input')({
@@ -57,16 +60,31 @@ const StyledCard = styled(Card)(({ theme }) => ({
 
 const Dashboard = () => {
   const [files, setFiles] = useState([]);
+  const [filteredFiles, setFilteredFiles] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const [previewType, setPreviewType] = useState('');
+  const [previewText, setPreviewText] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchFiles();
   }, []);
+
+  useEffect(() => {
+    if (searchQuery.trim() === '') {
+      setFilteredFiles(files);
+    } else {
+      const filtered = files.filter(file => 
+        file.originalName.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredFiles(filtered);
+    }
+  }, [searchQuery, files]);
 
   const fetchFiles = async () => {
     try {
@@ -213,9 +231,20 @@ const Dashboard = () => {
             const blob = new Blob([fileResponse.data], { type: document.mimeType });
             const blobUrl = URL.createObjectURL(blob);
 
+            // Nếu là file text/code, đọc nội dung
+            let content = null;
+            if (document.mimeType.startsWith('text/') || 
+                document.mimeType === 'application/json' ||
+                document.mimeType === 'application/xml' ||
+                document.mimeType.startsWith('application/javascript') ||
+                document.mimeType.startsWith('text/x-')) {
+              content = await fileResponse.data.text();
+            }
+
             setSelectedDocument({
               ...document,
-              url: blobUrl
+              url: blobUrl,
+              content: content
             });
             setOpenDialog(true);
           } else {
@@ -252,7 +281,7 @@ const Dashboard = () => {
                 <Typography variant="h5" gutterBottom>
                   Document Management
                 </Typography>
-                <Box sx={{ mt: 2, mb: 2 }}>
+                <Box sx={{ mt: 2, mb: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
                   <Button
                     component="label"
                     variant="contained"
@@ -265,6 +294,20 @@ const Dashboard = () => {
                       onChange={handleFileUpload}
                     />
                   </Button>
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    placeholder="Search documents..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
                 </Box>
                 {uploading && <LinearProgress sx={{ mt: 2, mb: 2 }} />}
                 {error && (
@@ -294,7 +337,7 @@ const Dashboard = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {files.map((file) => (
+            {filteredFiles.map((file) => (
               <TableRow key={file._id}>
                 <TableCell component="th" scope="row">
                   {file.originalName}
@@ -329,10 +372,10 @@ const Dashboard = () => {
                 </TableCell>
               </TableRow>
             ))}
-            {files.length === 0 && (
+            {filteredFiles.length === 0 && (
               <TableRow>
                 <TableCell colSpan={4} align="center">
-                  No files uploaded yet
+                  {searchQuery ? 'No matching files found' : 'No files uploaded yet'}
                 </TableCell>
               </TableRow>
             )}
@@ -363,10 +406,75 @@ const Dashboard = () => {
                   height="600px"
                   title={selectedDocument.originalName}
                 />
+              ) : selectedDocument.mimeType.startsWith('video/') ? (
+                <video
+                  controls
+                  style={{ maxWidth: '100%', maxHeight: '600px' }}
+                >
+                  <source src={selectedDocument.url} type={selectedDocument.mimeType} />
+                  Your browser does not support the video tag.
+                </video>
+              ) : selectedDocument.mimeType.startsWith('text/') || 
+                  selectedDocument.mimeType === 'application/json' ||
+                  selectedDocument.mimeType === 'application/xml' ||
+                  selectedDocument.mimeType.startsWith('application/javascript') ||
+                  selectedDocument.mimeType.startsWith('text/x-') ? (
+                <Box sx={{ 
+                  backgroundColor: '#f5f5f5', 
+                  padding: 2, 
+                  borderRadius: 1,
+                  maxHeight: '600px',
+                  overflow: 'auto'
+                }}>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {selectedDocument.content}
+                  </pre>
+                </Box>
+              ) : selectedDocument.mimeType.startsWith('application/vnd.openxmlformats-officedocument') ||
+                  selectedDocument.mimeType.startsWith('application/vnd.ms-') ? (
+                <Box sx={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center',
+                  gap: 2,
+                  padding: 3
+                }}>
+                  <Typography variant="h6">
+                    Office Document Preview
+                  </Typography>
+                  <Typography>
+                    This document can be previewed using Microsoft Office Online or Google Docs.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => window.open(selectedDocument.url, '_blank')}
+                  >
+                    Open in New Tab
+                  </Button>
+                </Box>
               ) : (
-                <Typography>
-                  Preview not available for this file type. Please download to view.
-                </Typography>
+                <Box sx={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center',
+                  gap: 2,
+                  padding: 3
+                }}>
+                  <Typography variant="h6">
+                    Preview Not Available
+                  </Typography>
+                  <Typography>
+                    This file type cannot be previewed directly. Please download to view.
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={() => handleDownload(selectedDocument._id)}
+                  >
+                    Download File
+                  </Button>
+                </Box>
               )}
             </Box>
           )}

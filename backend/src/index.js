@@ -6,14 +6,10 @@ const fileRoutes = require('./routes/fileRoutes');
 const connectDB = require('./config/database');
 const authRoutes = require('./routes/auth');
 const documentRoutes = require('./routes/documents');
-const mongoose = require('mongoose');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Connect to MongoDB
-connectDB();
 
 // Middleware
 app.use(cors());
@@ -36,21 +32,26 @@ app.use('/api', fileRoutes);
 
 // Health check
 app.get('/', (req, res) => {
-    res.json({ message: 'CloudStudy API is running' });
+  res.json({ message: 'CloudStudy API is running' });
 });
 
 // Error handling
 app.use(errorHandler);
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log('Connected to MongoDB');
+// Start server
+const startServer = async () => {
+  try {
+    // Connect to MongoDB
+    await connectDB();
+    
+    // Start server
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
     });
-  })
-  .catch(err => {
-    console.error('MongoDB connection error:', err);
+  } catch (error) {
+    console.error('Failed to start server:', error);
     process.exit(1);
-  }); 
+  }
+};
+
+startServer(); 

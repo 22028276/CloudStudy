@@ -3,6 +3,8 @@ const fs = require('fs');
 const openstackService = require('../services/openstackService');
 const Document = require('../models/Document');
 const axios = require('axios');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
 
 // Tạo thư mục uploads nếu chưa tồn tại
 const uploadDir = path.join(__dirname, '../../uploads');
@@ -223,23 +225,61 @@ const documentController = {
             }
 
             // Kiểm tra loại file có thể preview
-            const previewableTypes = [
-                'application/pdf',
-                'image/jpeg',
-                'image/png',
-                'image/gif',
-                'image/webp',
-                'text/plain',
-                'text/csv',
-                'application/vnd.ms-powerpoint',
-                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                'application/json'
-            ];
+            const previewableTypes = {
+                // Documents
+                'application/pdf': 'pdf',
+                'application/msword': 'doc',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+                'application/vnd.ms-excel': 'xls',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+                'application/vnd.ms-powerpoint': 'ppt',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+                // Images
+                'image/jpeg': 'image',
+                'image/png': 'image',
+                'image/gif': 'image',
+                'image/webp': 'image',
+                'image/svg+xml': 'image',
+                'image/bmp': 'image',
+                // Videos
+                'video/mp4': 'video',
+                'video/mpeg': 'video',
+                'video/quicktime': 'video',
+                'video/x-msvideo': 'video',
+                'video/x-ms-wmv': 'video',
+                'video/webm': 'video',
+                // Text
+                'text/plain': 'text',
+                'text/csv': 'text',
+                'text/html': 'text',
+                'text/css': 'text',
+                'text/javascript': 'text',
+                'application/json': 'text',
+                'application/xml': 'text',
+                // Code
+                'application/javascript': 'code',
+                'application/x-javascript': 'code',
+                'text/x-java': 'code',
+                'text/x-python': 'code',
+                'text/x-c++': 'code',
+                'text/x-c': 'code',
+                'text/x-php': 'code',
+                'text/x-ruby': 'code',
+                'text/x-shellscript': 'code',
+                'text/x-sql': 'code',
+                'text/x-yaml': 'code',
+                'text/x-markdown': 'code',
+                // Jupyter Notebook
+                'application/x-ipynb+json': 'notebook',
+                'application/vnd.jupyter.notebook': 'notebook'
+            };
 
-            if (!previewableTypes.includes(document.mimeType)) {
+            const fileType = previewableTypes[document.mimeType];
+            if (!fileType) {
                 return res.status(400).json({
                     success: false,
-                    message: 'File type not supported for preview. Please download to view.'
+                    message: 'File type not supported for preview. Please download to view.',
+                    supportedTypes: Object.keys(previewableTypes)
                 });
             }
 
@@ -253,6 +293,9 @@ const documentController = {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
             res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            
+            // Thêm header để chỉ định loại preview
+            res.setHeader('X-Preview-Type', fileType);
             
             // Pipe file stream đến response
             fileStream.pipe(res);
