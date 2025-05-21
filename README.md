@@ -133,7 +133,8 @@ openstack endpoint list | grep swift
 3. Enter a username (e.g., `cloudstudy-user`), and select:
    - ✅ **Programmatic access** (to generate an Access Key ID and Secret Access Key).
 4. Click **Next: Permissions**.
-5. ```json
+5. Attach existing policies
+```json
 {
     "Version": "2012-10-17",
     "Statement": [
