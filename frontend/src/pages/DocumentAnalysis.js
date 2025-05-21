@@ -37,6 +37,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import Layout from '../components/Layout';
+import axios from 'axios';
 
 const VisuallyHiddenInput = styled('input')({
   clip: 'rect(0 0 0 0)',
@@ -95,19 +96,28 @@ const DocumentAnalysis = () => {
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('analysisType', analysisType);
-      
       if (analysisType === 'translate') {
         formData.append('targetLanguage', targetLanguage);
       } else {
         formData.append('summaryLength', summaryLength);
       }
 
-      // TODO: Implement API call to backend
-      // const response = await axios.post('/api/analyze', formData);
-      // setAnalysisResult(response.data);
-      // setOpenResultDialog(true);
-      // setSuccess('Analysis completed successfully!');
-
+      // Gửi request tới backend
+      const response = await axios.post('http://localhost:3000/api/analysis', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      if (response.data.success) {
+        setAnalysisResult({
+          originalText: response.data.originalText,
+          result: response.data.result,
+        });
+        setOpenResultDialog(true);
+        setSuccess('Analysis completed successfully!');
+      } else {
+        setError(response.data.message || 'Failed to analyze document');
+      }
     } catch (error) {
       console.error('Analysis error:', error);
       setError(error.response?.data?.message || 'Failed to analyze document');

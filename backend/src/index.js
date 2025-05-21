@@ -7,6 +7,7 @@ const connectDB = require('./config/database');
 const authRoutes = require('./routes/auth');
 const documentRoutes = require('./routes/documents');
 const errorHandler = require('./middleware/errorHandler');
+const analysisRoutes = require('./routes/analysis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,6 +30,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api', fileRoutes);
+app.use('/api/analysis', analysisRoutes);
 
 // Health check
 app.get('/', (req, res) => {
