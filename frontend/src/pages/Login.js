@@ -8,26 +8,34 @@ import {
   Button,
   Typography,
   Alert,
-  Container,
-  CircularProgress
+  CircularProgress,
+  Link,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import axios from 'axios';
 
+const RootContainer = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  justifyContent: 'center',
+  alignItems: 'center',
+  minHeight: '100vh',
+  background: 'linear-gradient(to right bottom, #3f51b5, #5c6bc0)', // Subtle gradient background
+  padding: theme.spacing(2),
+}));
+
 const StyledCard = styled(Card)(({ theme }) => ({
-  maxWidth: 400,
-  margin: '100px auto',
-  padding: theme.spacing(3),
-  boxShadow: '0 8px 40px -12px rgba(0,0,0,0.3)',
-  '&:hover': {
-    boxShadow: '0 16px 70px -12.125px rgba(0,0,0,0.3)',
-  },
+  maxWidth: 450, // Slightly larger card
+  width: '100%',
+  padding: theme.spacing(4), // Increased padding
+  boxShadow: theme.shadows[10], // Stronger, more defined shadow
+  borderRadius: theme.shape.borderRadius * 2, // More rounded corners
+  backgroundColor: theme.palette.background.paper,
 }));
 
 const StyledForm = styled('form')(({ theme }) => ({
   display: 'flex',
   flexDirection: 'column',
-  gap: theme.spacing(3),
+  gap: theme.spacing(3), // Increased gap between form elements
 }));
 
 const Login = () => {
@@ -64,13 +72,13 @@ const Login = () => {
   };
 
   return (
-    <Container>
+    <RootContainer>
       <StyledCard>
         <CardContent>
-          <Typography variant="h4" component="h1" gutterBottom align="center">
+          <Typography variant="h4" component="h1" gutterBottom align="center" color="primary.main">
             CloudStudy
           </Typography>
-          <Typography variant="h6" gutterBottom align="center" color="textSecondary">
+          <Typography variant="h6" gutterBottom align="center" color="textSecondary" sx={{ mb: 4 }}>
             Sign in to your account
           </Typography>
 
@@ -90,6 +98,7 @@ const Login = () => {
               required
               disabled={loading}
               autoComplete="username"
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} // Rounded text fields
             />
             <TextField
               label="Password"
@@ -101,6 +110,7 @@ const Login = () => {
               required
               disabled={loading}
               autoComplete="current-password"
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }} // Rounded text fields
             />
             <Button
               type="submit"
@@ -108,32 +118,23 @@ const Login = () => {
               size="large"
               fullWidth
               disabled={loading}
-              sx={{
-                mt: 2,
-                background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
-                boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
-              }}
+              sx={{ mt: 2 }}
             >
               {loading ? <CircularProgress size={24} color="inherit" /> : 'Sign In'}
             </Button>
+            <Box sx={{ mt: 2, textAlign: 'center' }}>
+              <Typography variant="body2">
+                Don't have an account?{' '}
+                <Link component="button" onClick={() => navigate('/register')} sx={{ fontWeight: 600 }}>
+                  Register
+                </Link>
+              </Typography>
+            </Box>
           </StyledForm>
-
-          <Box sx={{ mt: 3, textAlign: 'center' }}>
-            <Typography variant="body2" color="textSecondary">
-              Don't have an account?{' '}
-              <Button 
-                color="primary" 
-                onClick={() => navigate('/register')}
-                disabled={loading}
-              >
-                Sign Up
-              </Button>
-            </Typography>
-          </Box>
         </CardContent>
       </StyledCard>
-    </Container>
+    </RootContainer>
   );
 };
 
-export default Login; 
+export default Login;

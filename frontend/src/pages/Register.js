@@ -1,16 +1,35 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Container,
   Paper,
   TextField,
   Button,
   Typography,
   Box,
   Alert,
-  CircularProgress
+  CircularProgress,
+  Link,
 } from '@mui/material';
+import { styled } from '@mui/material/styles';
 import axios from 'axios';
+
+const RootContainer = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  justifyContent: 'center',
+  alignItems: 'center',
+  minHeight: '100vh',
+  background: 'linear-gradient(to right bottom, #3f51b5, #5c6bc0)', // Consistent background with Login
+  padding: theme.spacing(2),
+}));
+
+const StyledPaper = styled(Paper)(({ theme }) => ({
+  maxWidth: 450,
+  width: '100%',
+  padding: theme.spacing(4),
+  boxShadow: theme.shadows[10],
+  borderRadius: theme.shape.borderRadius * 2,
+  backgroundColor: theme.palette.background.paper,
+}));
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -25,7 +44,7 @@ const Register = () => {
 
   const validateForm = () => {
     const newErrors = {};
-    
+
     // Validate username
     if (!formData.username.trim()) {
       newErrors.username = 'Username is required';
@@ -76,16 +95,18 @@ const Register = () => {
 
     setLoading(true);
     try {
-      const response = await axios.post('/api/auth/register', {
+      const response = await axios.post('http://localhost:3000/api/auth/register', {
         username: formData.username,
         password: formData.password
       });
 
-      // Save token to localStorage
-      localStorage.setItem('token', response.data.token);
-      
-      // Redirect to dashboard
-      navigate('/dashboard');
+      if (response.data.success) { // Assuming your backend returns a success flag
+        localStorage.setItem('token', response.data.data.token); // Adjust based on actual response structure
+        localStorage.setItem('user', JSON.stringify(response.data.data.user)); // Adjust based on actual response structure
+        navigate('/dashboard');
+      } else {
+        setError(response.data.message || 'Registration failed');
+      }
     } catch (error) {
       setError(error.response?.data?.message || 'Registration failed. Please try again.');
     } finally {
@@ -94,82 +115,82 @@ const Register = () => {
   };
 
   return (
-    <Container maxWidth="sm">
-      <Box sx={{ mt: 8 }}>
-        <Paper elevation={3} sx={{ p: 4 }}>
-          <Typography variant="h4" component="h1" gutterBottom align="center">
-            Register
-          </Typography>
-          
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
+    <RootContainer>
+      <StyledPaper elevation={3}>
+        <Typography variant="h4" component="h1" gutterBottom align="center" color="primary.main">
+          Register
+        </Typography>
 
-          <form onSubmit={handleSubmit}>
-            <TextField
-              fullWidth
-              label="Username"
-              name="username"
-              value={formData.username}
-              onChange={handleChange}
-              margin="normal"
-              required
-              error={!!errors.username}
-              helperText={errors.username}
-            />
-            
-            <TextField
-              fullWidth
-              label="Password"
-              name="password"
-              type="password"
-              value={formData.password}
-              onChange={handleChange}
-              margin="normal"
-              required
-              error={!!errors.password}
-              helperText={errors.password}
-            />
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
 
-            <TextField
-              fullWidth
-              label="Confirm Password"
-              name="confirmPassword"
-              type="password"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-              margin="normal"
-              required
-              error={!!errors.confirmPassword}
-              helperText={errors.confirmPassword}
-            />
+        <form onSubmit={handleSubmit}>
+          <TextField
+            fullWidth
+            label="Username"
+            name="username"
+            value={formData.username}
+            onChange={handleChange}
+            margin="normal"
+            required
+            error={!!errors.username}
+            helperText={errors.username}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+          />
 
-            <Button
-              type="submit"
-              fullWidth
-              variant="contained"
-              sx={{ mt: 3 }}
-              disabled={loading}
-            >
-              {loading ? <CircularProgress size={24} /> : 'Register'}
-            </Button>
+          <TextField
+            fullWidth
+            label="Password"
+            name="password"
+            type="password"
+            value={formData.password}
+            onChange={handleChange}
+            margin="normal"
+            required
+            error={!!errors.password}
+            helperText={errors.password}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+          />
 
-            <Button
-              fullWidth
-              variant="text"
-              onClick={() => navigate('/login')}
-              sx={{ mt: 1 }}
-              disabled={loading}
-            >
-              Already have an account? Login
-            </Button>
-          </form>
-        </Paper>
-      </Box>
-    </Container>
+          <TextField
+            fullWidth
+            label="Confirm Password"
+            name="confirmPassword"
+            type="password"
+            value={formData.confirmPassword}
+            onChange={handleChange}
+            margin="normal"
+            required
+            error={!!errors.confirmPassword}
+            helperText={errors.confirmPassword}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}
+          />
+
+          <Button
+            type="submit"
+            fullWidth
+            variant="contained"
+            size="large"
+            disabled={loading}
+            sx={{ mt: 3 }}
+          >
+            {loading ? <CircularProgress size={24} color="inherit" /> : 'Register'}
+          </Button>
+          <Box sx={{ mt: 2, textAlign: 'center' }}>
+            <Typography variant="body2">
+              Already have an account?{' '}
+              <Link component="button" onClick={() => navigate('/login')} sx={{ fontWeight: 600 }}>
+                Sign In
+              </Link>
+            </Typography>
+          </Box>
+        </form>
+      </StyledPaper>
+    </RootContainer>
   );
 };
 
-export default Register; 
+export default Register;

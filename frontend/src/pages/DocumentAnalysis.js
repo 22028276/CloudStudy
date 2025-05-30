@@ -9,19 +9,11 @@ import {
   IconButton,
   LinearProgress,
   Paper,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Alert,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField,
   Select,
   MenuItem,
   FormControl,
@@ -33,9 +25,8 @@ import { styled } from '@mui/material/styles';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import TranslateIcon from '@mui/icons-material/Translate';
 import SummarizeIcon from '@mui/icons-material/Summarize';
-import DeleteIcon from '@mui/icons-material/Delete';
+import CloseIcon from '@mui/icons-material/Close';
 import DownloadIcon from '@mui/icons-material/Download';
-import VisibilityIcon from '@mui/icons-material/Visibility';
 import Layout from '../components/Layout';
 import axios from 'axios';
 
@@ -51,17 +42,6 @@ const VisuallyHiddenInput = styled('input')({
   width: 1,
 });
 
-const StyledCard = styled(Card)(({ theme }) => ({
-  height: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  transition: 'transform 0.2s ease-in-out',
-  '&:hover': {
-    transform: 'translateY(-4px)',
-    boxShadow: theme.shadows[4],
-  },
-}));
-
 const DocumentAnalysis = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -73,13 +53,14 @@ const DocumentAnalysis = () => {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [openResultDialog, setOpenResultDialog] = useState(false);
 
-  const handleFileUpload = async (event) => {
+  const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
     setSelectedFile(file);
     setError('');
     setSuccess('');
+    setAnalysisResult(null); // Clear previous result
   };
 
   const handleAnalyze = async () => {
@@ -91,8 +72,16 @@ const DocumentAnalysis = () => {
     setUploading(true);
     setError('');
     setSuccess('');
+    setAnalysisResult(null);
 
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('You are not authenticated. Please log in.');
+        setUploading(false);
+        return;
+      }
+
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('analysisType', analysisType);
@@ -102,10 +91,10 @@ const DocumentAnalysis = () => {
         formData.append('summaryLength', summaryLength);
       }
 
-      // Gửi request tới backend
       const response = await axios.post('http://localhost:3000/api/analysis', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`,
         },
       });
       if (response.data.success) {
@@ -120,7 +109,7 @@ const DocumentAnalysis = () => {
       }
     } catch (error) {
       console.error('Analysis error:', error);
-      setError(error.response?.data?.message || 'Failed to analyze document');
+      setError(error.response?.data?.message || 'Failed to analyze document. Please ensure the file is text-based and readable.');
     } finally {
       setUploading(false);
     }
@@ -133,14 +122,36 @@ const DocumentAnalysis = () => {
     setSuccess('');
   };
 
+  const handleCloseResultDialog = () => {
+    setOpenResultDialog(false);
+    setAnalysisResult(null);
+  };
+
+  const handleDownloadResult = () => {
+    if (analysisResult?.result) {
+      const filename = analysisType === 'translate' ? `translated_text_${Date.now()}.txt` : `summarized_text_${Date.now()}.txt`;
+      const blob = new Blob([analysisResult.result], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setSuccess('Analysis result downloaded!');
+    }
+  };
+
+
   return (
     <Layout>
-      <Box sx={{ mb: 4 }}>
+      <Box sx={{ flexGrow: 1, p: 3 }}>
         <Grid container spacing={3}>
           <Grid item xs={12}>
-            <StyledCard>
+            <Card>
               <CardContent>
-                <Typography variant="h5" gutterBottom>
+                <Typography variant="h5" gutterBottom color="primary.dark">
                   Document Analysis
                 </Typography>
                 <Box sx={{ mt: 2, mb: 2 }}>
@@ -151,11 +162,13 @@ const DocumentAnalysis = () => {
                         variant="contained"
                         startIcon={<CloudUploadIcon />}
                         disabled={uploading}
+                        size="large"
                       >
-                        Select File
+                        Select File for Analysis
                         <VisuallyHiddenInput
                           type="file"
                           onChange={handleFileUpload}
+                          accept=".pdf,.doc,.docx,.txt"
                         />
                       </Button>
                       {selectedFile && (
@@ -163,16 +176,21 @@ const DocumentAnalysis = () => {
                           label={selectedFile.name}
                           onDelete={handleClear}
                           color="primary"
+                          variant="outlined"
+                          sx={{ p: 1 }}
                         />
                       )}
                     </Box>
 
-                    <FormControl fullWidth>
+                    <FormControl fullWidth variant="outlined" sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
                       <InputLabel>Analysis Type</InputLabel>
                       <Select
                         value={analysisType}
                         label="Analysis Type"
-                        onChange={(e) => setAnalysisType(e.target.value)}
+                        onChange={(e) => {
+                          setAnalysisType(e.target.value);
+                          setAnalysisResult(null);
+                        }}
                       >
                         <MenuItem value="translate">Translate Document</MenuItem>
                         <MenuItem value="summarize">Summarize Document</MenuItem>
@@ -180,7 +198,7 @@ const DocumentAnalysis = () => {
                     </FormControl>
 
                     {analysisType === 'translate' ? (
-                      <FormControl fullWidth>
+                      <FormControl fullWidth variant="outlined" sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
                         <InputLabel>Target Language</InputLabel>
                         <Select
                           value={targetLanguage}
@@ -198,7 +216,7 @@ const DocumentAnalysis = () => {
                         </Select>
                       </FormControl>
                     ) : (
-                      <FormControl fullWidth>
+                      <FormControl fullWidth variant="outlined" sx={{ '& .MuiOutlinedInput-root': { borderRadius: '8px' } }}>
                         <InputLabel>Summary Length</InputLabel>
                         <Select
                           value={summaryLength}
@@ -219,8 +237,10 @@ const DocumentAnalysis = () => {
                       onClick={handleAnalyze}
                       disabled={!selectedFile || uploading}
                       fullWidth
+                      size="large"
+                      sx={{ mt: 2 }}
                     >
-                      {analysisType === 'translate' ? 'Translate' : 'Summarize'}
+                      {analysisType === 'translate' ? 'Translate Document' : 'Summarize Document'}
                     </Button>
                   </Stack>
                 </Box>
@@ -237,53 +257,60 @@ const DocumentAnalysis = () => {
                   </Alert>
                 )}
               </CardContent>
-            </StyledCard>
+            </Card>
           </Grid>
         </Grid>
       </Box>
 
       <Dialog
         open={openResultDialog}
-        onClose={() => setOpenResultDialog(false)}
+        onClose={handleCloseResultDialog}
         maxWidth="md"
         fullWidth
+        scroll="paper"
       >
-        <DialogTitle>
-          {analysisType === 'translate' ? 'Translation Result' : 'Summary Result'}
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h6">
+            {analysisType === 'translate' ? 'Translation Result' : 'Summary Result'}
+          </Typography>
+          <IconButton onClick={handleCloseResultDialog}>
+            <CloseIcon />
+          </IconButton>
         </DialogTitle>
-        <DialogContent>
+        <DialogContent dividers>
           {analysisResult && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Original Text
+            <Box>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
+                Original Text:
               </Typography>
-              <Paper sx={{ p: 2, mb: 2, maxHeight: 200, overflow: 'auto' }}>
-                <Typography>{analysisResult.originalText}</Typography>
+              <Paper variant="outlined" sx={{ p: 2, mb: 3, backgroundColor: '#f0f0f0', maxHeight: 300, overflowY: 'auto' }}>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {analysisResult.originalText}
+                </Typography>
               </Paper>
 
-              <Typography variant="h6" gutterBottom>
-                {analysisType === 'translate' ? 'Translated Text' : 'Summary'}
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold' }}>
+                {analysisType === 'translate' ? 'Translated Text:' : 'Summarized Text:'}
               </Typography>
-              <Paper sx={{ p: 2, maxHeight: 400, overflow: 'auto' }}>
-                <Typography>{analysisResult.result}</Typography>
+              <Paper variant="outlined" sx={{ p: 2, mb: 3, backgroundColor: '#e8f5e9', maxHeight: 300, overflowY: 'auto' }}>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {analysisResult.result}
+                </Typography>
               </Paper>
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenResultDialog(false)}>Close</Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              // TODO: Implement download functionality
-            }}
-          >
-            Download Result
-          </Button>
+          <Button onClick={handleCloseResultDialog}>Close</Button>
+          {analysisResult?.result && (
+            <Button onClick={handleDownloadResult} startIcon={<DownloadIcon />} variant="contained">
+              Download Result
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Layout>
   );
 };
 
-export default DocumentAnalysis; 
+export default DocumentAnalysis;
