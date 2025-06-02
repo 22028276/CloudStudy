@@ -7,7 +7,9 @@ const os = require('os');
 
 // Cấu hình AWS SDK
 AWS.config.update({
-  region: process.env.AWS_REGION || 'ap-southeast-1',
+  region: process.env.AWS_REGION || 'us-east-1', // Đảm bảo vùng hợp lệ
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
 });
 
 const s3 = new AWS.S3();
@@ -23,7 +25,7 @@ const upload = multer({
   },
 });
 
-// Danh sách ngôn ngữ hỗ trợ
+// Danh sách ngôn ngữ hỗ trợ (Translate hỗ trợ nhiều hơn, đây chỉ là ví dụ)
 const SUPPORTED_LANGUAGES = {
   'vi': 'Tiếng Việt',
   'en': 'English',
@@ -34,69 +36,130 @@ const SUPPORTED_LANGUAGES = {
   'de': 'Deutsch',
   'es': 'Español',
   'ru': 'Русский',
+  'ar': 'العربية',
+  'pt': 'Português',
+  'it': 'Italiano',
+  'th': 'ภาษาไทย',
 };
 
-// Hàm làm sạch văn bản tiếng Việt
-const cleanVietnameseText = (text) => {
+// Hàm làm sạch văn bản
+const cleanText = (text) => {
   return text
-    .replace(/[^\p{L}\p{N}\p{P}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/([.!?])\s*/g, '$1 ')
+    .replace(/[^\p{L}\p{N}\p{P}\s]/gu, ' ') // Giữ lại chữ cái, số, dấu câu và khoảng trắng
+    .replace(/\s+/g, ' ') // Thay thế nhiều khoảng trắng bằng một khoảng trắng
+    .replace(/([.!?])\s*/g, '$1 ') // Đảm bảo có khoảng trắng sau dấu câu
     .trim();
 };
 
-// Hàm xử lý kết quả từ Textract
-const processTextractResult = (blocks) => {
-  let text = '';
-  let currentLine = '';
-  let lastY = null;
-  const lineSpacing = 5;
+// Hàm xây dựng lại văn bản từ các block của Textract
+const buildTextFromBlocks = (blocks) => {
+    const blockMap = new Map();
+    blocks.forEach(block => blockMap.set(block.Id, block));
 
-  // Sắp xếp blocks theo vị trí Y và X
-  blocks.sort((a, b) => {
-    const yDiff = Math.abs(a.Geometry.BoundingBox.Top - b.Geometry.BoundingBox.Top);
-    if (yDiff < lineSpacing) {
-      return a.Geometry.BoundingBox.Left - b.Geometry.BoundingBox.Left;
-    }
-    return a.Geometry.BoundingBox.Top - b.Geometry.BoundingBox.Top;
-  });
+    let fullText = '';
 
-  // Xử lý từng block
-  blocks.forEach(block => {
-    if (block.BlockType === 'LINE') {
-      const y = block.Geometry.BoundingBox.Top;
-      
-      // Xử lý xuống dòng
-      if (lastY === null || Math.abs(y - lastY) > lineSpacing) {
-        if (currentLine) {
-          text += currentLine + '\n';
-          currentLine = '';
+    // Lọc ra các blocks kiểu PAGE và sắp xếp theo số trang
+    const pageBlocks = blocks.filter(block => block.BlockType === 'PAGE').sort((a, b) => (a.Page || 0) - (b.Page || 0));
+
+    pageBlocks.forEach(pageBlock => {
+        // Đã loại bỏ việc thêm "--- Page X ---" ở đây theo yêu cầu
+        // const pageNumber = pageBlock.Page || 'Unknown';
+        // if (fullText.length > 0) {
+        //     fullText += `\n\n--- Page ${pageNumber} ---\n\n`; // Phân cách rõ ràng giữa các trang
+        // } else {
+        //     fullText += `--- Page ${pageNumber} ---\n\n`;
+        // }
+
+        // Lấy tất cả các ID của các block con trực tiếp của trang
+        const pageChildIds = pageBlock.Relationships?.find(rel => rel.Type === 'CHILD')?.Ids || [];
+        // Lọc các block con mà chúng ta quan tâm: LINE, TABLE, KEY_VALUE_SET
+        const relevantPageChildren = pageChildIds
+            .map(id => blockMap.get(id))
+            .filter(block => block && ['LINE', 'TABLE', 'KEY_VALUE_SET'].includes(block.BlockType));
+
+        // Sắp xếp các khối con (LINE, TABLE, KEY_VALUE_SET) theo vị trí trên trang
+        relevantPageChildren.sort((a, b) => {
+            const yA = a.Geometry.BoundingBox.Top;
+            const yB = b.Geometry.BoundingBox.Top;
+            const xA = a.Geometry.BoundingBox.Left;
+            const xB = b.Geometry.BoundingBox.Left;
+
+            const VERTICAL_ALIGNMENT_THRESHOLD = 0.01; // Ngưỡng nhỏ để coi là cùng "dòng ngang"
+            const maxChildHeight = Math.max(a.Geometry.BoundingBox.Height || 0, b.Geometry.BoundingBox.Height || 0);
+
+            // Nếu vị trí Y rất gần nhau, sắp xếp theo X
+            if (Math.abs(yA - yB) < VERTICAL_ALIGNMENT_THRESHOLD * maxChildHeight) {
+                return xA - xB;
+            }
+            // Ngược lại, sắp xếp theo Y
+            return yA - yB;
+        });
+
+        relevantPageChildren.forEach(childBlock => {
+            if (childBlock.BlockType === 'LINE') {
+                fullText += childBlock.Text + '\n';
+            } else if (childBlock.BlockType === 'TABLE') {
+                fullText += '\n\nTable Data:\n';
+                fullText += processTable(childBlock, blocks) + '\n';
+            } else if (childBlock.BlockType === 'KEY_VALUE_SET') {
+                const keyId = childBlock.Relationships?.find(rel => rel.Type === 'CHILD')?.Ids[0];
+                const keyBlock = keyId ? blockMap.get(keyId) : null;
+                const keyText = keyBlock?.BlockType === 'WORD' ? keyBlock.Text : '';
+
+                const valueId = childBlock.Relationships?.find(rel => rel.Type === 'VALUE')?.Ids[0];
+                const valueBlock = valueId ? blockMap.get(valueId) : null;
+                const valueText = (valueBlock?.Relationships?.find(rel => rel.Type === 'CHILD')?.Ids || [])
+                                    .map(id => blockMap.get(id))
+                                    .filter(b => b?.BlockType === 'WORD')
+                                    .map(b => b.Text)
+                                    .join(' ');
+                
+                if (keyText) {
+                    fullText += `\nForm Field: ${keyText}: ${valueText}\n`;
+                }
+            }
+        });
+    });
+
+    return cleanText(fullText);
+};
+
+// Hàm xử lý bảng
+const processTable = (tableBlock, allBlocks) => {
+    const blockMap = new Map();
+    allBlocks.forEach(block => blockMap.set(block.Id, block));
+
+    const cells = tableBlock.Relationships?.find(rel => rel.Type === 'CHILD')?.Ids
+        .map(id => blockMap.get(id))
+        .filter(block => block && block.BlockType === 'CELL') || [];
+
+    const rows = {};
+    cells.forEach(cell => {
+        const rowIndex = cell.RowIndex;
+        const columnIndex = cell.ColumnIndex;
+        if (!rows[rowIndex]) {
+            rows[rowIndex] = [];
         }
-        lastY = y;
-      }
-      
-      // Thêm text vào dòng hiện tại
-      currentLine += (currentLine ? ' ' : '') + block.Text;
-    } else if (block.BlockType === 'WORD') {
-      // Xử lý các từ riêng lẻ
-      const y = block.Geometry.BoundingBox.Top;
-      if (lastY === null || Math.abs(y - lastY) > lineSpacing) {
-        if (currentLine) {
-          text += currentLine + '\n';
-          currentLine = '';
-        }
-        lastY = y;
-      }
-      currentLine += (currentLine ? ' ' : '') + block.Text;
-    }
-  });
+        const cellText = (cell.Relationships?.find(rel => rel.Type === 'CHILD')?.Ids || [])
+            .map(id => blockMap.get(id))
+            .filter(block => block && block.BlockType === 'WORD')
+            .map(wordBlock => wordBlock.Text)
+            .join(' ');
 
-  // Thêm dòng cuối cùng
-  if (currentLine) {
-    text += currentLine;
-  }
+        rows[rowIndex].push({
+            text: cellText,
+            columnIndex: columnIndex
+        });
+    });
 
-  return cleanVietnameseText(text);
+    let tableOutput = '';
+    const sortedRowKeys = Object.keys(rows).sort((a, b) => parseInt(a) - parseInt(b));
+    sortedRowKeys.forEach(rowIndex => {
+        const row = rows[rowIndex];
+        row.sort((a, b) => a.columnIndex - b.columnIndex);
+        tableOutput += row.map(cell => `"${cell.text.replace(/"/g, '""')}"`).join(',') + '\n';
+    });
+    return tableOutput;
 };
 
 // Hàm xử lý file PDF
@@ -112,57 +175,14 @@ const processPDF = async (s3Key) => {
       FeatureTypes: ['TABLES', 'FORMS'],
     };
 
-    // Phân tích toàn bộ tài liệu
     const data = await textract.analyzeDocument(params).promise();
-    let text = processTextractResult(data.Blocks);
-
-    // Xử lý bảng
-    const tables = data.Blocks.filter(block => block.BlockType === 'TABLE');
-    for (const table of tables) {
-      const tableText = processTable(table, data.Blocks);
-      text += '\n\n' + tableText;
-    }
+    let text = buildTextFromBlocks(data.Blocks);
 
     return text;
   } catch (error) {
     console.error('PDF processing error:', error);
     throw new Error('PDF processing failed: ' + error.message);
   }
-};
-
-// Hàm xử lý bảng
-const processTable = (table, blocks) => {
-  const cells = blocks.filter(block => 
-    block.BlockType === 'CELL' && 
-    block.TableId === table.Id
-  );
-
-  const rows = {};
-  cells.forEach(cell => {
-    const rowIndex = cell.RowIndex;
-    if (!rows[rowIndex]) {
-      rows[rowIndex] = [];
-    }
-    rows[rowIndex].push({
-      text: blocks
-        .filter(block => 
-          block.BlockType === 'WORD' && 
-          block.CellId === cell.Id
-        )
-        .map(block => block.Text)
-        .join(' '),
-      columnIndex: cell.ColumnIndex
-    });
-  });
-
-  let tableText = '';
-  Object.keys(rows).sort((a, b) => a - b).forEach(rowIndex => {
-    const row = rows[rowIndex];
-    row.sort((a, b) => a.columnIndex - b.columnIndex);
-    tableText += row.map(cell => cell.text).join(' | ') + '\n';
-  });
-
-  return tableText;
 };
 
 // Hàm xử lý hình ảnh
@@ -177,27 +197,8 @@ const processImage = async (s3Key) => {
       }
     };
 
-    // Phát hiện text trong hình ảnh
-    const data = await textract.detectDocumentText(params).promise();
-    let text = processTextractResult(data.Blocks);
-
-    // Thử phân tích chi tiết hơn nếu có ít text
-    if (text.length < 100) {
-      const analyzeParams = {
-        Document: {
-          S3Object: {
-            Bucket: process.env.AWS_S3_BUCKET,
-            Name: s3Key
-          }
-        },
-        FeatureTypes: ['TABLES', 'FORMS']
-      };
-      const analyzeData = await textract.analyzeDocument(analyzeParams).promise();
-      const additionalText = processTextractResult(analyzeData.Blocks);
-      if (additionalText.length > text.length) {
-        text = additionalText;
-      }
-    }
+    const data = await textract.analyzeDocument(params).promise();
+    let text = buildTextFromBlocks(data.Blocks);
 
     return text;
   } catch (error) {
@@ -210,7 +211,7 @@ const processImage = async (s3Key) => {
 const processTextFile = (buffer) => {
   try {
     const text = buffer.toString('utf8');
-    return cleanVietnameseText(text);
+    return cleanText(text);
   } catch (error) {
     console.error('Text file processing error:', error);
     throw new Error('Text file processing failed: ' + error.message);
@@ -233,11 +234,12 @@ const extractTextFromFile = async (fileBuffer, mimeType) => {
         text = await processPDF(s3Key);
       } else if (mimeType.startsWith('image/')) {
         text = await processImage(s3Key);
-      } else {
+      } else if (mimeType.startsWith('text/')) {
         text = processTextFile(fileBuffer);
+      } else {
+        throw new Error('Unsupported file type for text extraction.');
       }
     } finally {
-      // Xóa file tạm từ S3
       await s3.deleteObject({
         Bucket: process.env.AWS_S3_BUCKET,
         Key: s3Key
@@ -256,13 +258,19 @@ const extractTextFromFile = async (fileBuffer, mimeType) => {
 };
 
 // Hàm chia văn bản thành các đoạn nhỏ
-const splitTextIntoChunks = (text, maxChunkSize = 4500) => {
-  const sentences = text.split(/(?<=[.!?])\s+/);
+const splitTextIntoChunks = (text, maxChunkSize = 4800) => {
+  const sentences = text.split(/(?<=[.!?])\s+|\n+/).filter(s => s.trim().length > 0);
   const chunks = [];
   let currentChunk = '';
 
   for (const sentence of sentences) {
-    if ((currentChunk + sentence).length > maxChunkSize) {
+    if (sentence.length > maxChunkSize) {
+        let tempSentence = sentence;
+        while (tempSentence.length > 0) {
+            chunks.push(tempSentence.substring(0, maxChunkSize));
+            tempSentence = tempSentence.substring(maxChunkSize);
+        }
+    } else if ((currentChunk + ' ' + sentence).trim().length > maxChunkSize) {
       if (currentChunk) chunks.push(currentChunk.trim());
       currentChunk = sentence;
     } else {
@@ -281,16 +289,10 @@ const translateText = async (text, sourceLanguage, targetLanguage) => {
     const translatedChunks = [];
     
     for (const chunk of chunks) {
-      // Xử lý đặc biệt cho các ký tự đặc biệt
-      const processedChunk = chunk
-        .replace(/\n/g, ' [NEWLINE] ')
-        .replace(/\t/g, ' [TAB] ')
-        .replace(/\s+/g, ' ');
-
       const params = {
         SourceLanguageCode: sourceLanguage,
         TargetLanguageCode: targetLanguage,
-        Text: processedChunk,
+        Text: chunk,
         Settings: {
           Formality: 'FORMAL',
           Profanity: 'MASK'
@@ -298,20 +300,15 @@ const translateText = async (text, sourceLanguage, targetLanguage) => {
       };
 
       const data = await translate.translateText(params).promise();
-      let translatedText = data.TranslatedText;
-
-      // Khôi phục các ký tự đặc biệt
-      translatedText = translatedText
-        .replace(/\[NEWLINE\]/g, '\n')
-        .replace(/\[TAB\]/g, '\t')
-        .replace(/\s+/g, ' ');
-
-      translatedChunks.push(translatedText);
+      translatedChunks.push(data.TranslatedText);
     }
 
     return translatedChunks.join(' ');
   } catch (error) {
     console.error('Translation error:', error);
+    if (error.code === 'UnsupportedLanguagePairException') {
+        throw new Error(`Translation failed: The language pair "${sourceLanguage}" to "${targetLanguage}" might not be supported by AWS Translate.`);
+    }
     throw new Error('Translation failed: ' + error.message);
   }
 };
@@ -319,25 +316,19 @@ const translateText = async (text, sourceLanguage, targetLanguage) => {
 // Hàm phân tích câu
 const analyzeSentence = async (sentence, language) => {
   try {
-    // Phân tích cảm xúc
-    const sentimentParams = {
-      LanguageCode: language,
-      Text: sentence
-    };
+    if (!sentence || sentence.trim().length === 0) {
+        return {
+            sentence, sentiment: 'NEUTRAL', sentimentScore: {}, keyPhrases: [], entities: []
+        };
+    }
+
+    const sentimentParams = { LanguageCode: language, Text: sentence };
     const sentimentData = await comprehend.detectSentiment(sentimentParams).promise();
 
-    // Phân tích từ khóa
-    const keyPhrasesParams = {
-      LanguageCode: language,
-      Text: sentence
-    };
+    const keyPhrasesParams = { LanguageCode: language, Text: sentence };
     const keyPhrasesData = await comprehend.detectKeyPhrases(keyPhrasesParams).promise();
 
-    // Phân tích thực thể
-    const entitiesParams = {
-      LanguageCode: language,
-      Text: sentence
-    };
+    const entitiesParams = { LanguageCode: language, Text: sentence };
     const entitiesData = await comprehend.detectEntities(entitiesParams).promise();
 
     return {
@@ -359,49 +350,100 @@ const analyzeSentence = async (sentence, language) => {
   }
 };
 
+// Hàm tính độ tương đồng đơn giản giữa hai câu (dựa trên từ chung)
+const calculateSentenceSimilarity = (sentenceA, sentenceB) => {
+    const wordsA = new Set(sentenceA.toLowerCase().split(/\W+/).filter(w => w.length > 0));
+    const wordsB = new Set(sentenceB.toLowerCase().split(/\W+/).filter(w => w.length > 0));
+
+    if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+    const intersection = new Set([...wordsA].filter(word => wordsB.has(word))).size;
+    const union = wordsA.size + wordsB.size - intersection;
+    
+    return intersection / union; // Jaccard similarity
+};
+
 // Hàm tóm tắt văn bản với AWS Comprehend
 const summarizeText = async (text, sourceLanguage, summaryLength) => {
   try {
-    // Chia văn bản thành câu
-    const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+    const sentences = text.split(/(?<=[.!?])\s+|\n+/).filter(s => s.trim().length > 0);
     
-    // Phân tích từng câu
+    if (sentences.length <= 5 && summaryLength === 'short') {
+        return sentences.join('. ').trim();
+    }
+    if (sentences.length <= 10 && summaryLength === 'medium') {
+        return sentences.join('. ').trim();
+    }
+    if (sentences.length <= 15 && summaryLength === 'long') {
+        return sentences.join('. ').trim();
+    }
+
     const analyzedSentences = await Promise.all(
       sentences.map(sentence => analyzeSentence(sentence, sourceLanguage))
     );
 
-    // Tính điểm quan trọng cho mỗi câu
     const scoredSentences = analyzedSentences.map(analysis => {
-      const importanceScore = 
-        // Cân nhắc cảm xúc
-        (analysis.sentimentScore.Positive + analysis.sentimentScore.Negative) * 0.3 +
-        // Cân nhắc số lượng từ khóa
-        (analysis.keyPhrases.length / 5) * 0.3 +
-        // Cân nhắc số lượng thực thể
-        (analysis.entities.length / 3) * 0.4;
+      const sentimentWeight = 0.1;
+      const keyPhraseWeight = 0.5;
+      const entityWeight = 0.4;
 
-      return {
-        ...analysis,
-        importanceScore
-      };
+      const importanceScore = 
+        (analysis.sentimentScore.Positive + analysis.sentimentScore.Negative) * sentimentWeight +
+        (analysis.keyPhrases.length / Math.max(1, analysis.sentence.split(' ').length)) * keyPhraseWeight +
+        (analysis.entities.length / Math.max(1, analysis.sentence.split(' ').length)) * entityWeight;
+      
+      const index = sentences.indexOf(analysis.sentence);
+      if (index === 0) {
+          analysis.importanceScore = importanceScore * 1.5; 
+      } else if (index === sentences.length - 1) {
+          analysis.importanceScore = importanceScore * 1.2;
+      } else {
+          analysis.importanceScore = importanceScore;
+      }
+      if (/\d+/.test(analysis.sentence)) {
+        analysis.importanceScore *= 1.1;
+      }
+
+      return analysis;
     });
 
-    // Sắp xếp câu theo độ quan trọng
     scoredSentences.sort((a, b) => b.importanceScore - a.importanceScore);
 
-    // Xác định số câu cần tóm tắt
-    const length = summaryLength === 'short' ? 3 : summaryLength === 'long' ? 15 : 7;
-    const selectedSentences = scoredSentences.slice(0, length);
+    let numSentencesToSummarize;
+    if (summaryLength === 'short') {
+      numSentencesToSummarize = Math.max(2, Math.ceil(sentences.length * 0.10));
+    } else if (summaryLength === 'long') {
+      numSentencesToSummarize = Math.max(10, Math.ceil(sentences.length * 0.35));
+    } else {
+      numSentencesToSummarize = Math.max(5, Math.ceil(sentences.length * 0.20));
+    }
+    numSentencesToSummarize = Math.min(numSentencesToSummarize, sentences.length);
 
-    // Sắp xếp lại câu theo thứ tự ban đầu
+    const selectedSentences = scoredSentences.slice(0, numSentencesToSummarize);
+
+    const finalSummarySentences = [];
+    // Đã điều chỉnh ngưỡng tương đồng
+    const similarityThreshold = 0.55; // Giảm ngưỡng để loại bỏ nhiều trùng lặp hơn
+    
     selectedSentences.sort((a, b) => 
-      sentences.indexOf(a.sentence) - sentences.indexOf(b.sentence)
+        sentences.indexOf(a.sentence) - sentences.indexOf(b.sentence)
     );
 
-    // Tạo tóm tắt
-    const summary = selectedSentences
-      .map(s => s.sentence)
-      .join('. ') + '.';
+    selectedSentences.forEach(newSentenceAnalysis => {
+        const isDuplicate = finalSummarySentences.some(existingSentenceText => {
+            return calculateSentenceSimilarity(newSentenceAnalysis.sentence, existingSentenceText) > similarityThreshold;
+        });
+
+        if (!isDuplicate) {
+            finalSummarySentences.push(newSentenceAnalysis.sentence);
+        }
+    });
+
+    let summary = finalSummarySentences
+      .join('. ') + (finalSummarySentences.length > 0 && !finalSummarySentences[finalSummarySentences.length - 1].endsWith('.') ? '.' : '');
+    
+    // Thêm bước làm sạch để loại bỏ dấu chấm kép
+    summary = summary.replace(/\.\.+/g, '.');
 
     return summary;
   } catch (error) {
@@ -413,7 +455,7 @@ const summarizeText = async (text, sourceLanguage, summaryLength) => {
 const detectLanguage = async (text) => {
   try {
     const params = {
-      Text: text.slice(0, 1000),
+      Text: text.slice(0, 4500),
     };
     const data = await comprehend.detectDominantLanguage(params).promise();
     return data.Languages && data.Languages[0]?.LanguageCode || 'en';
@@ -423,10 +465,9 @@ const detectLanguage = async (text) => {
   }
 };
 
-// Hàm tạo file tạm
 const createTempFile = async (content, extension) => {
   const tempDir = os.tmpdir();
-  const fileName = `translation-${Date.now()}.${extension}`;
+  const fileName = `translation-${uuidv4()}-${Date.now()}${extension}`;
   const filePath = path.join(tempDir, fileName);
   
   await fs.promises.writeFile(filePath, content, 'utf8');
@@ -435,6 +476,7 @@ const createTempFile = async (content, extension) => {
 
 const analysisController = {
   analyze: async (req, res) => {
+    let tempFile = null;
     try {
       const { analysisType, targetLanguage, summaryLength } = req.body;
       const file = req.file;
@@ -454,11 +496,20 @@ const analysisController = {
         });
       }
 
+      const supportedMimeTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff', 'text/plain'];
+      if (!supportedMimeTypes.includes(file.mimetype) && !file.mimetype.startsWith('text/')) {
+          return res.status(400).json({
+              success: false,
+              message: `Unsupported file type: ${file.mimetype}. Supported types are: PDF, JPEG, PNG, TIFF, and Text files.`,
+              supportedLanguages: SUPPORTED_LANGUAGES
+          });
+      }
+
       const text = await extractTextFromFile(file.buffer, file.mimetype);
-      if (!text) {
+      if (!text || text.trim().length === 0) {
         return res.status(400).json({ 
           success: false, 
-          message: 'Could not extract text from file' 
+          message: 'Could not extract text from file or extracted text is empty.' 
         });
       }
 
@@ -466,29 +517,31 @@ const analysisController = {
       console.log('Detected source language:', sourceLanguage);
 
       let result = '';
-      let tempFile = null;
+      
 
       if (analysisType === 'translate') {
-        result = await translateText(text, sourceLanguage, targetLanguage);
+        if (sourceLanguage === targetLanguage) {
+          result = text;
+        } else {
+          result = await translateText(text, sourceLanguage, targetLanguage);
+        }
         
-        // Tạo file tạm cho kết quả dịch
         const extension = path.extname(file.originalname) || '.txt';
         tempFile = await createTempFile(result, extension);
         
-        // Upload file lên S3
         const s3Key = `translations/${uuidv4()}-${tempFile.fileName}`;
         await s3.putObject({
           Bucket: process.env.AWS_S3_BUCKET,
           Key: s3Key,
           Body: result,
           ContentType: 'text/plain',
+          ACL: 'private'
         }).promise();
 
-        // Tạo URL tạm thời cho file
         const signedUrl = await s3.getSignedUrlPromise('getObject', {
           Bucket: process.env.AWS_S3_BUCKET,
           Key: s3Key,
-          Expires: 3600 // URL hết hạn sau 1 giờ
+          Expires: 3600
         });
 
         return res.json({ 
@@ -510,6 +563,11 @@ const analysisController = {
           sourceLanguage,
           supportedLanguages: SUPPORTED_LANGUAGES
         });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid analysisType. Supported types are "translate" and "summarize".'
+        });
       }
     } catch (error) {
       console.error('Analysis error:', error);
@@ -518,9 +576,13 @@ const analysisController = {
         message: error.message,
         supportedLanguages: SUPPORTED_LANGUAGES
       });
+    } finally {
+      if (tempFile && fs.existsSync(tempFile.filePath)) {
+          await fs.promises.unlink(tempFile.filePath).catch(err => console.error('Error deleting local temp file:', err));
+      }
     }
   },
   upload,
 };
 
-module.exports = analysisController; 
+module.exports = analysisController;
