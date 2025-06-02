@@ -1,6 +1,7 @@
 const { S3Client } = require('@aws-sdk/client-s3');
 const { TextractClient } = require('@aws-sdk/client-textract');
 const { ComprehendClient } = require('@aws-sdk/client-comprehend');
+const { TranslateClient } = require('@aws-sdk/client-translate'); // Thêm dòng này
 const { CognitoIdentityProviderClient } = require('@aws-sdk/client-cognito-identity-provider');
 
 // Validate required environment variables
@@ -54,23 +55,22 @@ const comprehendClient = new ComprehendClient({
   }
 });
 
+const translateClient = new TranslateClient({ // Thêm client này
+  region: requiredEnvVars.AWS_REGION,
+  credentials: {
+    accessKeyId: requiredEnvVars.AWS_ACCESS_KEY_ID,
+    secretAccessKey: requiredEnvVars.AWS_SECRET_ACCESS_KEY
+  }
+});
+
 // Export configuration
 module.exports = {
   s3Client,
   cognitoClient,
   textractClient,
   comprehendClient,
+  translateClient, // Export thêm client này
   userPoolId: process.env.AWS_COGNITO_USER_POOL_ID,
   clientId: process.env.AWS_COGNITO_CLIENT_ID,
-  bucketName: requiredEnvVars.AWS_S3_BUCKET,
-  region: requiredEnvVars.AWS_REGION,
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  config: {
-    region: requiredEnvVars.AWS_REGION,
-    credentials: {
-      accessKeyId: requiredEnvVars.AWS_ACCESS_KEY_ID,
-      secretAccessKey: requiredEnvVars.AWS_SECRET_ACCESS_KEY
-    }
-  }
-}; 
+  s3Bucket: requiredEnvVars.AWS_S3_BUCKET // Thêm s3Bucket để dễ dàng truy cập
+};

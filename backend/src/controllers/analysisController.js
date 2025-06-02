@@ -1,21 +1,19 @@
-const AWS = require('aws-sdk');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner'); // <-- Đảm bảo bạn đã cài gói này
 
-// Cấu hình AWS SDK
-AWS.config.update({
-  region: process.env.AWS_REGION || 'us-east-1', // Đảm bảo vùng hợp lệ
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-});
+// Import các client SDK v3 từ file cấu hình aws.js
+const { s3Client, textractClient, translateClient, comprehendClient } = require('../config/aws');
 
-const s3 = new AWS.S3();
-const textract = new AWS.Textract();
-const translate = new AWS.Translate();
-const comprehend = new AWS.Comprehend();
+// Import các lệnh (Commands) cần thiết từ SDK v3
+const { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { AnalyzeDocumentCommand, DetectDocumentTextCommand } = require('@aws-sdk/client-textract');
+const { TranslateTextCommand } = require('@aws-sdk/client-translate');
+const { DetectDominantLanguageCommand, DetectSentimentCommand, DetectKeyPhrasesCommand, DetectEntitiesCommand } = require('@aws-sdk/client-comprehend');
+
 
 // Cấu hình multer để xử lý file upload
 const upload = multer({
@@ -85,7 +83,7 @@ const buildTextFromBlocks = (blocks) => {
                 return xA - xB;
             }
             // Ngược lại, sắp xếp theo Y
-            return yA - yB;
+            return yA - b.Geometry.BoundingBox.Top;
         });
 
         relevantPageChildren.forEach(childBlock => {
@@ -168,7 +166,9 @@ const processPDF = async (s3Key) => {
       FeatureTypes: ['TABLES', 'FORMS'],
     };
 
-    const data = await textract.analyzeDocument(params).promise();
+    // Sử dụng TextractClient và AnalyzeDocumentCommand
+    const command = new AnalyzeDocumentCommand(params);
+    const data = await textractClient.send(command);
     let text = buildTextFromBlocks(data.Blocks);
 
     return text;
@@ -190,8 +190,9 @@ const processImage = async (s3Key) => {
       }
     };
 
-    // Changed analyzeDocument to detectDocumentText for image processing
-    const data = await textract.detectDocumentText(params).promise(); 
+    // Sử dụng TextractClient và DetectDocumentTextCommand
+    const command = new DetectDocumentTextCommand(params);
+    const data = await textractClient.send(command);
     let text = buildTextFromBlocks(data.Blocks);
 
     return text;
@@ -215,36 +216,41 @@ const processTextFile = (buffer) => {
 const extractTextFromFile = async (fileBuffer, mimeType) => {
   try {
     const s3Key = `temp/${uuidv4()}-${Date.now()}`;
-    await s3.putObject({
+    
+    // Sử dụng PutObjectCommand của S3Client
+    const putCommand = new PutObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET,
       Key: s3Key,
       Body: fileBuffer,
       ContentType: mimeType,
-    }).promise();
+    });
+    await s3Client.send(putCommand);
 
-    let text = '';
+    let extractedText = ''; // Đổi tên biến để tránh nhầm lẫn với 'text' toàn cục
     try {
       if (mimeType === 'application/pdf') {
-        text = await processPDF(s3Key);
+        extractedText = await processPDF(s3Key);
       } else if (mimeType.startsWith('image/')) {
-        text = await processImage(s3Key);
+        extractedText = await processImage(s3Key);
       } else if (mimeType.startsWith('text/')) {
-        text = processTextFile(fileBuffer);
+        extractedText = processTextFile(fileBuffer);
       } else {
         throw new Error('Unsupported file type for text extraction.');
       }
     } finally {
-      await s3.deleteObject({
+      // Sử dụng DeleteObjectCommand của S3Client
+      const deleteCommand = new DeleteObjectCommand({
         Bucket: process.env.AWS_S3_BUCKET,
         Key: s3Key
-      }).promise();
+      });
+      await s3Client.send(deleteCommand);
     }
 
-    if (!text || text.trim().length === 0) {
+    if (!extractedText || extractedText.trim().length === 0) {
       throw new Error('No text could be extracted from the file');
     }
 
-    return text;
+    return extractedText;
   } catch (error) {
     console.error('File processing error:', error);
     throw new Error('File processing failed: ' + error.message);
@@ -293,14 +299,16 @@ const translateText = async (text, sourceLanguage, targetLanguage) => {
         }
       };
 
-      const data = await translate.translateText(params).promise();
+      // Sử dụng TranslateClient và TranslateTextCommand
+      const command = new TranslateTextCommand(params);
+      const data = await translateClient.send(command);
       translatedChunks.push(data.TranslatedText);
     }
 
     return translatedChunks.join(' ');
   } catch (error) {
     console.error('Translation error:', error);
-    if (error.code === 'UnsupportedLanguagePairException') {
+    if (error.name === 'UnsupportedLanguagePairException') { // Sử dụng error.name
         throw new Error(`Translation failed: The language pair "${sourceLanguage}" to "${targetLanguage}" might not be supported by AWS Translate.`);
     }
     throw new Error('Translation failed: ' + error.message);
@@ -316,14 +324,15 @@ const analyzeSentence = async (sentence, language) => {
         };
     }
 
-    const sentimentParams = { LanguageCode: language, Text: sentence };
-    const sentimentData = await comprehend.detectSentiment(sentimentParams).promise();
+    // Sử dụng ComprehendClient và các lệnh của nó
+    const sentimentCommand = new DetectSentimentCommand({ LanguageCode: language, Text: sentence });
+    const sentimentData = await comprehendClient.send(sentimentCommand);
 
-    const keyPhrasesParams = { LanguageCode: language, Text: sentence };
-    const keyPhrasesData = await comprehend.detectKeyPhrases(keyPhrasesParams).promise();
+    const keyPhrasesCommand = new DetectKeyPhrasesCommand({ LanguageCode: language, Text: sentence });
+    const keyPhrasesData = await comprehendClient.send(keyPhrasesCommand);
 
-    const entitiesParams = { LanguageCode: language, Text: sentence };
-    const entitiesData = await comprehend.detectEntities(entitiesParams).promise();
+    const entitiesCommand = new DetectEntitiesCommand({ LanguageCode: language, Text: sentence });
+    const entitiesData = await comprehendClient.send(entitiesCommand);
 
     return {
       sentence,
@@ -334,6 +343,7 @@ const analyzeSentence = async (sentence, language) => {
     };
   } catch (error) {
     console.error('Sentence analysis error:', error);
+    // Trả về giá trị mặc định trong trường hợp lỗi
     return {
       sentence,
       sentiment: 'NEUTRAL',
@@ -451,7 +461,9 @@ const detectLanguage = async (text) => {
     const params = {
       Text: text.slice(0, 4500),
     };
-    const data = await comprehend.detectDominantLanguage(params).promise();
+    // Sử dụng ComprehendClient và DetectDominantLanguageCommand
+    const command = new DetectDominantLanguageCommand(params);
+    const data = await comprehendClient.send(command);
     return data.Languages && data.Languages[0]?.LanguageCode || 'en';
   } catch (error) {
     console.error('Error detecting language:', error);
@@ -523,20 +535,25 @@ const analysisController = {
         const extension = path.extname(file.originalname) || '.txt';
         tempFile = await createTempFile(result, extension);
         
-        const s3Key = `translations/${uuidv4()}-${tempFile.fileName}`;
-        await s3.putObject({
+        // ĐỊNH NGHĨA s3Key MỚI CHO BẢN DỊCH TẠI ĐÂY
+        const translatedS3Key = `translations/${uuidv4()}-${tempFile.fileName}`; 
+        
+        // Sử dụng PutObjectCommand của S3Client
+        const putCommand = new PutObjectCommand({
           Bucket: process.env.AWS_S3_BUCKET,
-          Key: s3Key,
+          Key: translatedS3Key, // <-- Sử dụng biến mới đã định nghĩa
           Body: result,
           ContentType: 'text/plain',
           ACL: 'private'
-        }).promise();
-
-        const signedUrl = await s3.getSignedUrlPromise('getObject', {
-          Bucket: process.env.AWS_S3_BUCKET,
-          Key: s3Key,
-          Expires: 3600
         });
+        await s3Client.send(putCommand);
+
+        // Tạo URL có chữ ký, cần S3Client
+        const signedUrl = await getSignedUrl(s3Client, new GetObjectCommand({
+          Bucket: process.env.AWS_S3_BUCKET,
+          Key: translatedS3Key // <-- Cũng sử dụng biến mới đã định nghĩa ở đây
+        }), { expiresIn: 3600 });
+
 
         return res.json({ 
           success: true, 
