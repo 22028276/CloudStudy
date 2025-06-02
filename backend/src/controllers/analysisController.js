@@ -62,13 +62,6 @@ const buildTextFromBlocks = (blocks) => {
     const pageBlocks = blocks.filter(block => block.BlockType === 'PAGE').sort((a, b) => (a.Page || 0) - (b.Page || 0));
 
     pageBlocks.forEach(pageBlock => {
-        // Đã loại bỏ việc thêm "--- Page X ---" ở đây theo yêu cầu
-        // const pageNumber = pageBlock.Page || 'Unknown';
-        // if (fullText.length > 0) {
-        //     fullText += `\n\n--- Page ${pageNumber} ---\n\n`; // Phân cách rõ ràng giữa các trang
-        // } else {
-        //     fullText += `--- Page ${pageNumber} ---\n\n`;
-        // }
 
         // Lấy tất cả các ID của các block con trực tiếp của trang
         const pageChildIds = pageBlock.Relationships?.find(rel => rel.Type === 'CHILD')?.Ids || [];
@@ -197,7 +190,8 @@ const processImage = async (s3Key) => {
       }
     };
 
-    const data = await textract.analyzeDocument(params).promise();
+    // Changed analyzeDocument to detectDocumentText for image processing
+    const data = await textract.detectDocumentText(params).promise(); 
     let text = buildTextFromBlocks(data.Blocks);
 
     return text;

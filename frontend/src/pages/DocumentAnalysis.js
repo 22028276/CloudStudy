@@ -168,7 +168,7 @@ const DocumentAnalysis = () => {
                         <VisuallyHiddenInput
                           type="file"
                           onChange={handleFileUpload}
-                          accept=".pdf,.doc,.docx,.txt"
+                          accept=".pdf,.doc,.docx,.txt.pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,video/*,.mp4,.mov,.avi,.js,.html,.css,.py,.java,.json,.xml,.csv"
                         />
                       </Button>
                       {selectedFile && (
