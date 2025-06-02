@@ -23,7 +23,6 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Chip,
   TextField,
   InputAdornment,
 } from '@mui/material';
@@ -311,7 +310,7 @@ const Dashboard = () => {
                     <VisuallyHiddenInput
                       type="file"
                       onChange={handleFileUpload}
-                      accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.bmp,.webp,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,video/*,.mp4,.mov,.avi,.js,.html,.css,.py,.java,.json,.xml,.csv"
                     />
                   </Button>
                   <TextField
